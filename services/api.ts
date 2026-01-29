@@ -1,6 +1,6 @@
 
-import { Pool, NewsItem } from '../types';
-import { API_ENDPOINTS, STABLECOINS, MIN_TVL } from '../constants';
+import { Pool, NewsItem } from '../types.ts';
+import { API_ENDPOINTS, STABLECOINS, MIN_TVL } from '../constants.ts';
 
 const KNOWN_AUDITED_PROJECTS = [
   'aave', 'makerdao', 'curve', 'convex', 'lido', 'ethena', 'stargate', 
@@ -24,10 +24,6 @@ const sanitizeUrl = (url: string): string => {
   }
 };
 
-/**
- * Returns a set of high-quality mock data for CryptoPanic
- * Used when the API is not configured or if the request fails (CORS/Network)
- */
 const getMockCryptoPanicData = (): NewsItem[] => [
   {
     id: 1,
@@ -77,26 +73,10 @@ export const fetchStablecoinPools = async (): Promise<Pool[]> => {
 
     return filteredPools.map((p: any) => {
       let isAudit = false;
-      const auditVal = p.audits;
-      if (auditVal === true || String(auditVal).toLowerCase() === 'yes' || String(auditVal).toLowerCase() === 'true') {
+      if (p.project && KNOWN_AUDITED_PROJECTS.some(k => p.project.toLowerCase().includes(k))) {
         isAudit = true;
-      } else if (typeof auditVal === 'string' && !isNaN(parseInt(auditVal))) {
-        isAudit = parseInt(auditVal) > 0;
-      } else if (typeof auditVal === 'number') {
-        isAudit = auditVal > 0;
       }
-      if (!isAudit && p.project) {
-        const projectSlug = p.project.toLowerCase().replace(/\s+/g, '-');
-        if (KNOWN_AUDITED_PROJECTS.some(k => projectSlug.includes(k) || k.includes(projectSlug))) {
-          isAudit = true;
-        }
-      }
-      return { 
-        ...p, 
-        isAudit: isAudit,
-        apyMean7d: p.apyMean7d,
-        apyMean30d: p.apyMean30d
-      };
+      return { ...p, isAudit };
     });
   } catch (error) {
     console.error('Error fetching DeFiLlama pools:', error);
@@ -104,52 +84,48 @@ export const fetchStablecoinPools = async (): Promise<Pool[]> => {
   }
 };
 
-export const fetchCryptoPanicAll = async (apiKey: string, filter: 'stablecoins' | 'all' = 'all'): Promise<NewsItem[]> => {
-  // If no API key or default placeholder is used, return mock data
+export const fetchCryptoPanicAll = async (apiKey: string, filterType: 'stablecoins' | 'all' = 'all'): Promise<NewsItem[]> => {
   if (!apiKey || apiKey === 'YOUR_CRYPTOPANIC_API_KEY') {
     return getMockCryptoPanicData();
   }
 
   try {
-    const filterParam = filter === 'stablecoins' ? '&filter=stablecoins' : '';
-    const targetUrl = `${API_ENDPOINTS.CRYPTOPANIC_NEWS}${apiKey}${filterParam}`;
+    // 修正 1: 根据文档，过滤币种应使用 currencies 参数
+    // 修正 2: 仅获取英文内容以保证质量
+    const currencyFilter = filterType === 'stablecoins' ? `&currencies=${STABLECOINS.join(',')}` : '';
+    const targetUrl = `${API_ENDPOINTS.CRYPTOPANIC_NEWS}${apiKey}${currencyFilter}&public=true&regions=en`;
     
-    /**
-     * NOTE: CryptoPanic API does not support CORS for client-side browser requests.
-     * We use AllOrigins proxy. We use the /get endpoint which returns a JSON wrapper.
-     */
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+    // 修正 3: 使用 corsproxy.io，它比 allorigins 对 Cloudflare 部署更友好
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
     
     const response = await fetch(proxyUrl);
-    if (!response.ok) {
-      throw new Error(`Proxy network error: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
     
-    const proxyData = await response.json();
-    const contents = proxyData.contents;
-
-    if (!contents) {
-      throw new Error('Proxy returned empty contents');
+    const data = await response.json();
+    
+    if (!data.results || !Array.isArray(data.results)) {
+      throw new Error('Invalid API Response structure');
     }
 
-    // Check if contents is HTML (common for 403/404/Cloudflare errors returned as strings)
-    if (contents.trim().startsWith('<!DOCTYPE') || contents.trim().startsWith('<html')) {
-      throw new Error('Proxy returned HTML instead of JSON. The target URL might be blocked or the API key is invalid.');
-    }
-
-    try {
-      const data = JSON.parse(contents);
-      return (data.results || []).map((item: any) => ({
-        ...item,
-        url: sanitizeUrl(item.url)
-      }));
-    } catch (parseError) {
-      console.warn('Failed to parse CryptoPanic JSON contents. Falling back to mock data.');
-      return getMockCryptoPanicData();
-    }
+    return data.results.map((item: any) => {
+      // 修正 4: 识别社交媒体来源
+      const domain = item.source?.domain?.toLowerCase() || '';
+      const isSocial = domain.includes('twitter') || domain.includes('reddit') || domain.includes('t.me');
+      
+      return {
+        id: item.id,
+        title: item.title,
+        published_at: item.published_at,
+        url: sanitizeUrl(item.url),
+        source: {
+          title: item.source?.title || 'Unknown Source',
+          domain: domain
+        },
+        kind: isSocial ? 'social' : 'news'
+      };
+    });
   } catch (error) {
-    // Suppress heavy logging if it's a known fetch error, just return mock
-    console.warn('CryptoPanic fetch failed (CORS/Network/Key). Using offline mock data.');
+    console.warn('CryptoPanic API fetch failed. Using fallback data.', error);
     return getMockCryptoPanicData();
   }
 };

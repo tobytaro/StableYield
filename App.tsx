@@ -1,21 +1,18 @@
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Shield, 
   Search, 
-  Activity, 
   ExternalLink, 
   RefreshCcw,
   Zap,
-  Twitter,
   AlertTriangle,
   ChevronUp,
   ChevronDown,
   ArrowUpDown,
   Info,
   X,
-  BookOpen,
   Scale,
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   MessageSquare,
@@ -23,9 +20,9 @@ import {
   LayoutGrid,
   Newspaper
 } from 'lucide-react';
-import { Pool, NewsItem } from './types';
-import { fetchStablecoinPools, fetchCryptoPanicAll } from './services/api';
-import { STABLECOINS, MOCK_API_KEY } from './constants';
+import { Pool, NewsItem } from './types.ts';
+import { fetchStablecoinPools, fetchCryptoPanicAll } from './services/api.ts';
+import { STABLECOINS, MOCK_API_KEY } from './constants.ts';
 
 type SortKey = 'apy' | 'apyMean30d' | 'tvlUsd' | 'safety';
 type SortDirection = 'asc' | 'desc';
@@ -102,6 +99,7 @@ const App: React.FC = () => {
   const [pools, setPools] = useState<Pool[]>([]);
   const [allPosts, setAllPosts] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStable, setSelectedStable] = useState<string | null>(null);
   const [newsFilter, setNewsFilter] = useState<'stablecoins' | 'all'>('all');
@@ -112,13 +110,19 @@ const App: React.FC = () => {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [poolData, postData] = await Promise.all([
-      fetchStablecoinPools(),
-      fetchCryptoPanicAll(MOCK_API_KEY, newsFilter)
-    ]);
-    setPools(poolData);
-    setAllPosts(postData);
-    setLoading(false);
+    try {
+      const [poolData, postData] = await Promise.all([
+        fetchStablecoinPools(),
+        fetchCryptoPanicAll(MOCK_API_KEY, newsFilter)
+      ]);
+      if (poolData.length > 0) setPools(poolData);
+      if (postData.length > 0) setAllPosts(postData);
+    } catch (err) {
+      console.error("Data fetch error:", err);
+    } finally {
+      setLoading(false);
+      setIsFirstLoad(false);
+    }
   }, [newsFilter]);
 
   const newsList = useMemo(() => allPosts.filter(p => p.kind !== 'social'), [allPosts]);
@@ -145,7 +149,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 300000);
+    const interval = setInterval(loadData, 300000); // 每5分钟刷新一次，避免触发 API 限制
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -202,11 +206,26 @@ const App: React.FC = () => {
     return sortConfig.direction === 'desc' ? <ChevronDown className="w-3 h-3 ml-1 text-emerald-400" /> : <ChevronUp className="w-3 h-3 ml-1 text-emerald-400" />;
   };
 
+  if (isFirstLoad) {
+    return (
+      <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[999]">
+        <div className="relative mb-8">
+          <div className="absolute inset-0 bg-emerald-500/20 blur-2xl rounded-full"></div>
+          <Shield className="w-16 h-16 text-emerald-500 relative animate-pulse" />
+        </div>
+        <h2 className="text-xl font-bold tracking-tighter text-white uppercase mb-2">Sentinel Terminal</h2>
+        <div className="flex items-center gap-2">
+          <RefreshCcw className="w-4 h-4 text-emerald-500 animate-spin" />
+          <span className="text-[10px] mono text-slate-500 uppercase tracking-widest">Initializing Uplink...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#020617] text-slate-200 flex flex-col selection:bg-emerald-500/30 pb-20 lg:pb-0">
       <SafetyModal isOpen={isSafetyModalOpen} onClose={() => setIsSafetyModalOpen(false)} />
       
-      {/* 1. Header & Market Status Bar */}
       <div className="sticky top-0 z-[110] bg-[#020617]">
         <header className="p-4 md:p-6 flex flex-col md:flex-row justify-between items-center gap-4 border-b border-slate-800/50 bg-[#020617]/95 backdrop-blur-lg">
           <div className="flex items-center justify-between w-full md:w-auto">
@@ -219,10 +238,7 @@ const App: React.FC = () => {
                 <p className="hidden md:block text-[10px] text-slate-500 mt-1 uppercase tracking-[0.2em] font-bold">Terminal Interface</p>
               </div>
             </div>
-            <button 
-              onClick={loadData}
-              className="md:hidden p-2 bg-slate-900 border border-slate-800 rounded-lg active:scale-95 transition-transform"
-            >
+            <button onClick={loadData} className="md:hidden p-2 bg-slate-900 border border-slate-800 rounded-lg active:scale-95 transition-transform">
               <RefreshCcw className={`w-4 h-4 text-slate-400 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -235,16 +251,10 @@ const App: React.FC = () => {
                 placeholder="Filter protocol..."
                 className="w-full bg-slate-900/50 border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-emerald-500/50 transition-all shadow-inner"
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               />
             </div>
-            <button 
-              onClick={loadData}
-              className="hidden md:flex p-2.5 bg-slate-900 border border-slate-800 rounded-xl hover:bg-slate-800 transition-colors shadow-sm"
-            >
+            <button onClick={loadData} className="hidden md:flex p-2.5 bg-slate-900 border border-slate-800 rounded-xl hover:bg-slate-800 transition-colors shadow-sm">
               <RefreshCcw className={`w-4 h-4 text-slate-400 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -305,15 +315,9 @@ const App: React.FC = () => {
                     <th className="px-4 py-4 text-center border-b border-slate-800 cursor-pointer" onClick={() => handleSort('safety')}>
                       <div className="flex items-center justify-center gap-1.5 group">
                         <span>SAFETY</span>
-                        <div className="relative flex items-center">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setIsSafetyModalOpen(true); }}
-                            className="p-1 hover:bg-slate-800 rounded-full transition-colors text-slate-500 hover:text-emerald-400"
-                            title="Safety Methodology"
-                          >
-                            <Info className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); setIsSafetyModalOpen(true); }} className="p-1 hover:bg-slate-800 rounded-full transition-colors text-slate-500 hover:text-emerald-400">
+                          <Info className="w-3.5 h-3.5" />
+                        </button>
                         <SortIndicator column="safety" />
                       </div>
                     </th>
@@ -398,7 +402,6 @@ const App: React.FC = () => {
                       <div className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">CURRENT APY</div>
                     </div>
                   </div>
-                  
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/50">
                       <p className="text-[9px] text-slate-500 uppercase font-bold mb-1">TOTAL TVL</p>
@@ -411,17 +414,11 @@ const App: React.FC = () => {
                       <p className="text-xs font-bold text-blue-400 mono truncate">{pool.symbol}</p>
                     </div>
                   </div>
-
                   <div className="flex items-center justify-between">
                     <span className={`text-[9px] font-black px-3 py-1 rounded-lg border ${pool.apy < 8 ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : pool.apy < 15 ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'}`}>
                       {pool.apy < 8 ? 'ROBUST' : pool.apy < 15 ? 'MODERATE' : 'HIGH RISK'}
                     </span>
-                    <a 
-                      href={`https://defillama.com/yields/pool/${pool.pool}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-xl text-[10px] font-bold text-slate-100 border border-slate-700 active:bg-slate-700"
-                    >
+                    <a href={`https://defillama.com/yields/pool/${pool.pool}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-slate-800 px-4 py-2 rounded-xl text-[10px] font-bold text-slate-100 border border-slate-700 active:bg-slate-700">
                       VIEW DETAILS <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -431,25 +428,15 @@ const App: React.FC = () => {
 
             <div className="p-4 bg-slate-900/60 border-t border-slate-800 flex items-center justify-between text-xs font-bold uppercase text-slate-500">
               <div className="flex items-center gap-3">
-                <button 
-                  disabled={currentPage === 1}
-                  onClick={() => { setCurrentPage(prev => Math.max(1, prev - 1)); window.scrollTo(0, 0); }}
-                  className="p-2.5 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors disabled:opacity-20 text-white"
-                >
+                <button disabled={currentPage === 1} onClick={() => { setCurrentPage(prev => Math.max(1, prev - 1)); window.scrollTo(0, 0); }} className="p-2.5 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors disabled:opacity-20 text-white">
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <span className="mono text-slate-400 text-[10px]">P.{currentPage} / {totalPages || 1}</span>
-                <button 
-                  disabled={currentPage === totalPages || totalPages === 0}
-                  onClick={() => { setCurrentPage(prev => Math.min(totalPages, prev + 1)); window.scrollTo(0, 0); }}
-                  className="p-2.5 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors disabled:opacity-20 text-white"
-                >
+                <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => { setCurrentPage(prev => Math.min(totalPages, prev + 1)); window.scrollTo(0, 0); }} className="p-2.5 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors disabled:opacity-20 text-white">
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
-              <div className="mono text-[10px] text-slate-600 hidden sm:block">
-                {filteredAndSortedPools.length} POOLS DETECTED
-              </div>
+              <div className="mono text-[10px] text-slate-600 hidden sm:block">{filteredAndSortedPools.length} POOLS DETECTED</div>
             </div>
           </div>
         </section>
@@ -463,7 +450,7 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="space-y-4">
-              {socialList.slice(0, 4).map(post => (
+              {socialList.length > 0 ? socialList.slice(0, 5).map(post => (
                 <div key={post.id} className="p-4 bg-slate-900/40 border border-slate-800/50 rounded-xl">
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-[10px] font-bold text-slate-400">{post.source.title}</span>
@@ -471,7 +458,9 @@ const App: React.FC = () => {
                   </div>
                   <p className="text-[11px] text-slate-300 leading-relaxed line-clamp-2">{post.title}</p>
                 </div>
-              ))}
+              )) : (
+                <div className="p-4 text-center text-[10px] text-slate-600 uppercase font-bold tracking-widest">Scanning Social Nodes...</div>
+              )}
             </div>
           </div>
 
@@ -482,55 +471,36 @@ const App: React.FC = () => {
                 <h2 className="text-[10px] uppercase tracking-widest font-black">MARKET INTELLIGENCE</h2>
               </div>
               <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
-                <button 
-                  onClick={() => setNewsFilter('all')} 
-                  className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'all' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}
-                >
-                  ALL
-                </button>
-                <button 
-                  onClick={() => setNewsFilter('stablecoins')} 
-                  className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'stablecoins' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}
-                >
-                  USD
-                </button>
+                <button onClick={() => setNewsFilter('all')} className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'all' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}>ALL</button>
+                <button onClick={() => setNewsFilter('stablecoins')} className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'stablecoins' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}>USD</button>
               </div>
             </div>
             <div className="space-y-6">
-              {newsList.map(item => (
+              {newsList.length > 0 ? newsList.map(item => (
                 <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer" className="block group pb-5 border-b border-slate-800/30">
-                  <h3 className="text-xs font-bold text-slate-300 group-hover:text-emerald-400 leading-relaxed mb-2">
-                    {item.title}
-                  </h3>
+                  <h3 className="text-xs font-bold text-slate-300 group-hover:text-emerald-400 leading-relaxed mb-2">{item.title}</h3>
                   <div className="flex items-center justify-between text-[9px] text-slate-500 uppercase font-bold">
                     <span>{item.source.title}</span>
                     <span>{new Date(item.published_at).toLocaleDateString()}</span>
                   </div>
                 </a>
-              ))}
+              )) : (
+                <div className="p-10 text-center text-[10px] text-slate-600 uppercase font-bold tracking-widest">Decrypting Intel Stream...</div>
+              )}
             </div>
           </div>
         </aside>
 
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-900/90 border-t border-slate-800 backdrop-blur-xl p-3 flex items-center justify-around z-[150]">
-          <button 
-            onClick={() => setActiveTab('yields')}
-            className={`flex flex-col items-center gap-1 transition-all ${activeTab === 'yields' ? 'text-emerald-400' : 'text-slate-500'}`}
-          >
+          <button onClick={() => setActiveTab('yields')} className={`flex flex-col items-center gap-1 transition-all ${activeTab === 'yields' ? 'text-emerald-400' : 'text-slate-500'}`}>
             <LayoutGrid className="w-5 h-5" />
             <span className="text-[10px] font-bold uppercase tracking-tighter">Yields</span>
           </button>
-          <button 
-            onClick={() => setActiveTab('intel')}
-            className={`flex flex-col items-center gap-1 transition-all ${activeTab === 'intel' ? 'text-blue-400' : 'text-slate-500'}`}
-          >
+          <button onClick={() => setActiveTab('intel')} className={`flex flex-col items-center gap-1 transition-all ${activeTab === 'intel' ? 'text-blue-400' : 'text-slate-500'}`}>
             <Newspaper className="w-5 h-5" />
             <span className="text-[10px] font-bold uppercase tracking-tighter">Intel</span>
           </button>
-          <button 
-            onClick={() => setIsSafetyModalOpen(true)}
-            className="flex flex-col items-center gap-1 text-slate-500 active:text-amber-400"
-          >
+          <button onClick={() => setIsSafetyModalOpen(true)} className="flex flex-col items-center gap-1 text-slate-500 active:text-amber-400">
             <Shield className="w-5 h-5" />
             <span className="text-[10px] font-bold uppercase tracking-tighter">Safety</span>
           </button>
