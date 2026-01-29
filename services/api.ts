@@ -35,6 +35,14 @@ const getMockCryptoPanicData = (): NewsItem[] => [
   },
   {
     id: 2,
+    title: "DeFi stablecoin yields outpace traditional savings as market volatility returns",
+    published_at: new Date(Date.now() - 300000).toISOString(),
+    url: "https://cryptopanic.com",
+    source: { title: "Blockworks", domain: "blockworks.co" },
+    kind: "news"
+  },
+  {
+    id: 3,
     title: "Poll: Which yield strategy are you using for USDC right now? #DeFi #Yield",
     published_at: new Date(Date.now() - 600000).toISOString(),
     url: "https://cryptopanic.com",
@@ -42,7 +50,7 @@ const getMockCryptoPanicData = (): NewsItem[] => [
     kind: "social"
   },
   {
-    id: 3,
+    id: 4,
     title: "Sky Finance governance proposal to increase USD1 debt ceiling passes",
     published_at: new Date(Date.now() - 3600000).toISOString(),
     url: "https://cryptopanic.com",
@@ -50,8 +58,8 @@ const getMockCryptoPanicData = (): NewsItem[] => [
     kind: "news"
   },
   {
-    id: 4,
-    title: "Massive inflow of $PYUSD detected on Solana DEXes. Yield farming season is back?",
+    id: 5,
+    title: "Massive inflow of $PYUSD detected on DEXes. Yield farming season is back?",
     published_at: new Date(Date.now() - 120000).toISOString(),
     url: "https://cryptopanic.com",
     source: { title: "Twitter / DeFi_Whale", domain: "twitter.com" },
@@ -84,48 +92,77 @@ export const fetchStablecoinPools = async (): Promise<Pool[]> => {
   }
 };
 
+/**
+ * Attempts to fetch data using a specified proxy
+ */
+async function fetchViaProxy(url: string, proxyType: 'allorigins' | 'codetabs' = 'allorigins'): Promise<any> {
+  const proxyUrl = proxyType === 'allorigins' 
+    ? `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`
+    : `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
+
+  const response = await fetch(proxyUrl);
+  if (!response.ok) throw new Error(`Proxy ${proxyType} failed: ${response.status}`);
+  
+  if (proxyType === 'allorigins') {
+    const resJson = await response.json();
+    if (!resJson.contents) throw new Error('AllOrigins returned empty content');
+    // Check if contents looks like HTML
+    if (resJson.contents.trim().startsWith('<')) {
+      throw new Error('AllOrigins returned HTML (blocked)');
+    }
+    return JSON.parse(resJson.contents);
+  } else {
+    // codetabs returns raw body
+    return await response.json();
+  }
+}
+
 export const fetchCryptoPanicAll = async (apiKey: string, filterType: 'stablecoins' | 'all' = 'all'): Promise<NewsItem[]> => {
   if (!apiKey || apiKey === 'YOUR_CRYPTOPANIC_API_KEY') {
     return getMockCryptoPanicData();
   }
 
+  // Reduce currency list length to avoid long URL detection by WAFs
+  const topStables = STABLECOINS.slice(0, 8);
+  const currencyFilter = filterType === 'stablecoins' ? `&currencies=${topStables.join(',')}` : '';
+  const targetUrl = `https://cryptopanic.com/api/v1/posts/?auth_token=${apiKey}${currencyFilter}&regions=en`;
+
   try {
-    // 修正 1: 根据文档，过滤币种应使用 currencies 参数
-    // 修正 2: 仅获取英文内容以保证质量
-    const currencyFilter = filterType === 'stablecoins' ? `&currencies=${STABLECOINS.join(',')}` : '';
-    const targetUrl = `${API_ENDPOINTS.CRYPTOPANIC_NEWS}${apiKey}${currencyFilter}&public=true&regions=en`;
-    
-    // 修正 3: 使用 corsproxy.io，它比 allorigins 对 Cloudflare 部署更友好
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-    
-    const response = await fetch(proxyUrl);
-    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-    
-    const data = await response.json();
-    
-    if (!data.results || !Array.isArray(data.results)) {
-      throw new Error('Invalid API Response structure');
+    // Primary attempt: AllOrigins
+    try {
+      const data = await fetchViaProxy(targetUrl, 'allorigins');
+      if (data.results) return data.results.map(formatNewsItem);
+    } catch (e) {
+      console.warn('Primary proxy failed, trying fallback...', e);
     }
 
-    return data.results.map((item: any) => {
-      // 修正 4: 识别社交媒体来源
-      const domain = item.source?.domain?.toLowerCase() || '';
-      const isSocial = domain.includes('twitter') || domain.includes('reddit') || domain.includes('t.me');
-      
-      return {
-        id: item.id,
-        title: item.title,
-        published_at: item.published_at,
-        url: sanitizeUrl(item.url),
-        source: {
-          title: item.source?.title || 'Unknown Source',
-          domain: domain
-        },
-        kind: isSocial ? 'social' : 'news'
-      };
-    });
+    // Secondary attempt: CodeTabs Proxy
+    try {
+      const data = await fetchViaProxy(targetUrl, 'codetabs');
+      if (data.results) return data.results.map(formatNewsItem);
+    } catch (e) {
+      console.warn('Secondary proxy failed.', e);
+    }
+
+    throw new Error('All proxies failed');
   } catch (error) {
-    console.warn('CryptoPanic API fetch failed. Using fallback data.', error);
+    console.warn('CryptoPanic API totally inaccessible. Using high-quality mock data.', error);
     return getMockCryptoPanicData();
   }
 };
+
+function formatNewsItem(item: any): NewsItem {
+  const domain = item.source?.domain?.toLowerCase() || '';
+  const isSocial = domain.includes('twitter') || domain.includes('reddit') || domain.includes('t.me');
+  return {
+    id: item.id,
+    title: item.title,
+    published_at: item.published_at,
+    url: sanitizeUrl(item.url),
+    source: {
+      title: item.source?.title || 'Unknown Source',
+      domain: domain
+    },
+    kind: isSocial ? 'social' : 'news'
+  };
+}

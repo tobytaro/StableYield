@@ -18,7 +18,9 @@ import {
   MessageSquare,
   Globe,
   LayoutGrid,
-  Newspaper
+  Newspaper,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { Pool, NewsItem } from './types.ts';
 import { fetchStablecoinPools, fetchCryptoPanicAll } from './services/api.ts';
@@ -107,6 +109,7 @@ const App: React.FC = () => {
   const [isSafetyModalOpen, setIsSafetyModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState<'yields' | 'intel'>('yields');
+  const [isLiveNews, setIsLiveNews] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -115,8 +118,15 @@ const App: React.FC = () => {
         fetchStablecoinPools(),
         fetchCryptoPanicAll(MOCK_API_KEY, newsFilter)
       ]);
-      if (poolData.length > 0) setPools(poolData);
-      if (postData.length > 0) setAllPosts(postData);
+      
+      if (poolData && poolData.length > 0) setPools(poolData);
+      
+      // Check if data is mock or live (simplistic check for demo)
+      if (postData && postData.length > 0) {
+        setAllPosts(postData);
+        // If the first post title matches our mock, it's probably mock data
+        setIsLiveNews(!postData[0].title.includes("achieves $3B TVL milestone"));
+      }
     } catch (err) {
       console.error("Data fetch error:", err);
     } finally {
@@ -149,7 +159,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 300000); // 每5分钟刷新一次，避免触发 API 限制
+    const interval = setInterval(loadData, 300000); 
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -470,9 +480,15 @@ const App: React.FC = () => {
                 <Globe className="w-4 h-4" />
                 <h2 className="text-[10px] uppercase tracking-widest font-black">MARKET INTELLIGENCE</h2>
               </div>
-              <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
-                <button onClick={() => setNewsFilter('all')} className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'all' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}>ALL</button>
-                <button onClick={() => setNewsFilter('stablecoins')} className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'stablecoins' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}>USD</button>
+              <div className="flex items-center gap-2">
+                <div className={`flex items-center gap-1.5 px-2 py-1 rounded border ${isLiveNews ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' : 'bg-amber-500/10 border-amber-500/30 text-amber-500'}`}>
+                  {isLiveNews ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+                  <span className="text-[9px] font-bold tracking-tighter">{isLiveNews ? 'LIVE' : 'CACHED'}</span>
+                </div>
+                <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                  <button onClick={() => setNewsFilter('all')} className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'all' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}>ALL</button>
+                  <button onClick={() => setNewsFilter('stablecoins')} className={`text-[9px] font-black px-3 py-1 rounded-md ${newsFilter === 'stablecoins' ? 'bg-slate-700 text-white' : 'text-slate-500'}`}>USD</button>
+                </div>
               </div>
             </div>
             <div className="space-y-6">
